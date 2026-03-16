@@ -1,102 +1,80 @@
-from tkinter import font
 import cv2
-from cv2 import FONT_HERSHEY_COMPLEX
-from cv2 import trace
 import mediapipe as mp
 import time
 
-from sqlalchemy import false
-
-
 class HandDetector():
     def __init__(self, mode=False, maxHands=2, model_Complexity=1, detectionConfd=0.5, trackConfd=0.5):
-        self.mode = mode
-        self.maxHands = maxHands
-        self.detectionConfd = detectionConfd
-        self.trackConfd = trackConfd
-        self.model_Complexity = model_Complexity
+        # Ensure arguments are cast to correct types for the Mediapipe C++ backend
+        self.mode = bool(mode)
+        self.maxHands = int(maxHands)
+        self.model_Complexity = int(model_Complexity)
+        self.detectionConfd = float(detectionConfd)
+        self.trackConfd = float(trackConfd)
 
-        # from stock hand detection module
+        # Explicitly reference solutions to avoid AttributeErrors
         self.mpHands = mp.solutions.hands
-        self.hands = self.mpHands.Hands(
-            self.mode, self.maxHands, self.model_Complexity, self.detectionConfd, self.trackConfd)
-
-        # for drawing the lines
         self.mpDraw = mp.solutions.drawing_utils
+        
+        # In 0.10.x, using keyword arguments is much safer
+        self.hands = self.mpHands.Hands(
+            static_image_mode=self.mode,
+            max_num_hands=self.maxHands,
+            model_complexity=self.model_Complexity,
+            min_detection_confidence=self.detectionConfd,
+            min_tracking_confidence=self.trackConfd
+        )
 
     def findHands(self, img, draw=True):
-        # CONVERT TO RGB
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        # processing
         self.results = self.hands.process(img_rgb)
-        # print(self.results.multi_hand_landmarks) - if hand in screen
 
         if self.results.multi_hand_landmarks:
-            for handLms in self.results.multi_hand_landmarks:  # iterates through each hand in screen
-
+            for handLms in self.results.multi_hand_landmarks:
                 if draw:
-                    # draws the points and the connections
                     self.mpDraw.draw_landmarks(
                         img, handLms, self.mpHands.HAND_CONNECTIONS)
-
         return img
 
-    # FOR POSITION OF THE DOTS
-
     def findPosition(self, img, handNo=0, draw=True):
-
-        # list of all landmark positions
         lmList = []
-
         if self.results.multi_hand_landmarks:
-            # selecting hand
-            myHand = self.results.multi_hand_landmarks[handNo]
-
-            # id number and position(lm info) of the points on the hand
-            for id, lm in enumerate(myHand.landmark):
-                # id - index of the point
-                # lm - (x, y, z) = coordinates but as ratio entire width and height(fraction)
-
-                # dimensions of whole image
-                height, width, channels = img.shape
-
-                # getting position in terms of pixels
-                cx, cy = int(lm.x*width), int(lm.y*height)
-
-                lmList.append((id, cx, cy))
-
+            # Check if requested hand index exists
+            if len(self.results.multi_hand_landmarks) > handNo:
+                myHand = self.results.multi_hand_landmarks[handNo]
+                h, w, c = img.shape
+                for id, lm in enumerate(myHand.landmark):
+                    cx, cy = int(lm.x * w), int(lm.y * h)
+                    lmList.append([id, cx, cy])
+                    if draw:
+                        cv2.circle(img, (cx, cy), 5, (255, 0, 255), cv2.FILLED)
         return lmList
 
-
-##################################################
-# IF THIS FILE IS RUN
-
 def main():
-    cap = cv2.VideoCapture(0)  # the webcam
+    cap = cv2.VideoCapture(0)
     detector = HandDetector()
-
-    # FOR FPS
     prevTime = 0
-    currTime = 0
 
-    #############################################
     while True:
         success, img = cap.read()
+        if not success: break
 
         img = detector.findHands(img)
-        lmList = detector.findPosition(img)
+        lmList = detector.findPosition(img, draw=False)
+        
+        # Example: Print position of the tip of the index finger (ID 8)
+        if len(lmList) != 0:
+            print(f"Index Tip: {lmList[8]}")
 
-        # for FPS
         currTime = time.time()
-        fps = 1/(currTime-prevTime)
+        fps = 1 / (currTime - prevTime)
         prevTime = currTime
-        cv2.putText(img, str(int(fps)), (10, 70),
-                    cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 0), 3)
 
-        cv2.imshow("VideoInput", img)
-        cv2.waitKey(1)
+        cv2.putText(img, f"FPS: {int(fps)}", (10, 70),
+                    cv2.FONT_HERSHEY_PLAIN, 3, (255, 0, 255), 3)
 
+        cv2.imshow("Hand Tracking", img)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 if __name__ == "__main__":
     main()
